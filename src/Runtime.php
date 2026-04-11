@@ -116,7 +116,25 @@ final class Runtime
      */
     private static function reconnectCapturedConnections(\Closure $task): void
     {
-        $rf = new \ReflectionFunction($task);
+        self::scanClosureVars($task);
+
+        // Laravel: purge all DB connections
+        if (\class_exists(\Illuminate\Support\Facades\DB::class, false)) {
+            try {
+                \Illuminate\Support\Facades\DB::purge();
+            } catch (\Throwable) {
+            }
+        }
+    }
+
+    /**
+     * Recursively scan a closure's captured variables for connections.
+     * Closures captured via `use` may themselves capture connection objects,
+     * so we recurse into nested closures to find them all.
+     */
+    private static function scanClosureVars(\Closure $closure): void
+    {
+        $rf = new \ReflectionFunction($closure);
         $vars = $rf->getStaticVariables();
 
         foreach ($vars as $var) {
@@ -130,15 +148,12 @@ final class Runtime
             }
             self::$processedIds[$id] = true;
 
-            self::handleConnection($var);
-        }
-
-        // Laravel: purge all DB connections
-        if (\class_exists(\Illuminate\Support\Facades\DB::class, false)) {
-            try {
-                \Illuminate\Support\Facades\DB::purge();
-            } catch (\Throwable) {
+            if ($var instanceof \Closure) {
+                self::scanClosureVars($var);
+                continue;
             }
+
+            self::handleConnection($var);
         }
     }
 
