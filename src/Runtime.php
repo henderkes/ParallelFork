@@ -48,6 +48,10 @@ final class Runtime
             throw new \RuntimeException('stream_socket_pair failed');
         }
 
+        // Reap any zombie children from previous forks
+        while (\pcntl_waitpid(-1, $status, WNOHANG) > 0) {
+        }
+
         $pid = \pcntl_fork();
         if ($pid < 0) {
             \fclose($pair[0]);
@@ -101,7 +105,6 @@ final class Runtime
             }
             \fclose($pair[1]);
 
-            \posix_kill(\posix_getpid(), SIGKILL);
             exit(0);
         }
 
@@ -116,25 +119,7 @@ final class Runtime
      */
     private static function reconnectCapturedConnections(\Closure $task): void
     {
-        self::scanClosureVars($task);
-
-        // Laravel: purge all DB connections
-        if (\class_exists(\Illuminate\Support\Facades\DB::class, false)) {
-            try {
-                \Illuminate\Support\Facades\DB::purge();
-            } catch (\Throwable) {
-            }
-        }
-    }
-
-    /**
-     * Recursively scan a closure's captured variables for connections.
-     * Closures captured via `use` may themselves capture connection objects,
-     * so we recurse into nested closures to find them all.
-     */
-    private static function scanClosureVars(\Closure $closure): void
-    {
-        $rf = new \ReflectionFunction($closure);
+        $rf = new \ReflectionFunction($task);
         $vars = $rf->getStaticVariables();
 
         foreach ($vars as $var) {
@@ -148,19 +133,24 @@ final class Runtime
             }
             self::$processedIds[$id] = true;
 
-            if ($var instanceof \Closure) {
-                self::scanClosureVars($var);
-                continue;
-            }
-
             self::handleConnection($var);
         }
+
+        // Laravel: purge all DB connections
+        if (\class_exists(\Illuminate\Support\Facades\DB::class, false)) {
+            try {
+                \Illuminate\Support\Facades\DB::purge();
+            } catch (\Throwable) {
+            }
+        }
     }
+
+    private const MAX_SCAN_DEPTH = 8;
 
     /**
      * Detect what kind of connection an object holds and abandon+reconnect it.
      */
-    private static function handleConnection(object $obj): void
+    private static function handleConnection(object $obj, int $depth = 0): void
     {
         // Doctrine EntityManager → get its DBAL Connection
         if (\interface_exists(\Doctrine\ORM\EntityManagerInterface::class, false)
@@ -230,11 +220,57 @@ final class Runtime
                     $innerId = \spl_object_id($inner);
                     if (! isset(self::$processedIds[$innerId])) {
                         self::$processedIds[$innerId] = true;
-                        self::handleConnection($inner);
+                        self::handleConnection($inner, $depth + 1);
                     }
                 }
             } catch (\Throwable) {
             }
+
+            return;
+        }
+
+        // Recursively scan object properties for nested connections
+        if ($depth < self::MAX_SCAN_DEPTH) {
+            self::scanObjectProperties($obj, $depth);
+        }
+    }
+
+    /**
+     * Reflect into an object's properties to find nested connection objects.
+     */
+    private static function scanObjectProperties(object $obj, int $depth): void
+    {
+        try {
+            $ref = new \ReflectionClass($obj);
+        } catch (\Throwable) {
+            return;
+        }
+
+        foreach ($ref->getProperties() as $prop) {
+            if ($prop->isStatic()) {
+                continue;
+            }
+
+            try {
+                if (! $prop->isInitialized($obj)) {
+                    continue;
+                }
+                $value = $prop->getValue($obj);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (! \is_object($value)) {
+                continue;
+            }
+
+            $id = \spl_object_id($value);
+            if (isset(self::$processedIds[$id])) {
+                continue;
+            }
+            self::$processedIds[$id] = true;
+
+            self::handleConnection($value, $depth + 1);
         }
     }
 
