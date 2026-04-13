@@ -10,7 +10,7 @@ use Henderkes\ParallelFork\Runtime;
  * Fork-only integration tests.
  *
  * These exercise fork-specific behavior: captured variables via use(),
- * afterFork callbacks, arrow functions, process isolation, etc.
+ * atFork callbacks, arrow functions, process isolation, etc.
  * ext-parallel cannot do these things, so we use \Henderkes\ParallelFork\Runtime directly.
  */
 class IntegrationTest extends ParallelTestCase
@@ -32,11 +32,11 @@ class IntegrationTest extends ParallelTestCase
             $this->runtime = null;
         }
 
-        // Clean up any afterFork callbacks registered during tests.
+        // Clean up any atFork callbacks registered during tests.
         try {
             $ref = new \ReflectionClass(Runtime::class);
-            $prop = $ref->getProperty('afterForkCallbacks');
-            $prop->setValue(null, []);
+            $ref->getProperty('namedCallbacks')->setValue(null, []);
+            $ref->getProperty('anonymousCallbacks')->setValue(null, []);
         } catch (\Throwable) {
         }
     }
@@ -103,15 +103,15 @@ class IntegrationTest extends ParallelTestCase
     }
 
     // =========================================================================
-    // afterFork callbacks
+    // atFork callbacks
     // =========================================================================
 
-    public function test_after_fork_callback_runs(): void
+    public function test_at_fork_callback_runs(): void
     {
         $markerFile = tempnam(sys_get_temp_dir(), 'fork_cb_');
         @unlink($markerFile);
 
-        Runtime::afterFork(function () use ($markerFile) {
+        Runtime::atFork(function () use ($markerFile) {
             file_put_contents($markerFile, 'callback-ran');
         });
 
@@ -126,17 +126,17 @@ class IntegrationTest extends ParallelTestCase
         @unlink($markerFile);
     }
 
-    public function test_multiple_after_fork_callbacks(): void
+    public function test_multiple_at_fork_callbacks(): void
     {
         $marker1 = tempnam(sys_get_temp_dir(), 'fork_cb1_');
         $marker2 = tempnam(sys_get_temp_dir(), 'fork_cb2_');
         @unlink($marker1);
         @unlink($marker2);
 
-        Runtime::afterFork(function () use ($marker1) {
+        Runtime::atFork(function () use ($marker1) {
             file_put_contents($marker1, 'cb1');
         });
-        Runtime::afterFork(function () use ($marker2) {
+        Runtime::atFork(function () use ($marker2) {
             file_put_contents($marker2, 'cb2');
         });
 

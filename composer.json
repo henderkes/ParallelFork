@@ -10,7 +10,10 @@
     },
     "suggest": {
         "ext-shmop": "Required for Sync (shared memory)",
-        "ext-sysvsem": "Required for Sync (semaphores)"
+        "ext-sysvsem": "Required for Sync (semaphores)",
+        "symfony/http-kernel": "For automatic Doctrine/HttpClient reset in Symfony apps (via ParallelForkBundle)",
+        "symfony/dependency-injection": "For automatic Doctrine/HttpClient reset in Symfony apps (via ParallelForkBundle)",
+        "illuminate/support": "For automatic DB::purge() in Laravel apps (via ParallelForkServiceProvider)"
     },
     "require-dev": {
         "ext-parallel": "*",
@@ -21,16 +24,32 @@
         "illuminate/events": "^13.4",
         "symfony/cache": "^7.0",
         "symfony/var-exporter": "^7.0",
+        "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
         "phpstan/phpstan": "^2.1",
         "laravel/pint": "^1.29",
         "brlabrussia/parallel-stub": "^1.1"
     },
     "autoload": {
-        "files": ["src/bootstrap.php"]
+        "psr-4": {
+            "Henderkes\\ParallelFork\\": "src/"
+        },
+        "files": ["src/functions.php"]
     },
     "autoload-dev": {
         "psr-4": {
             "Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "symfony": {
+            "bundles": {
+                "Henderkes\\ParallelFork\\Symfony\\ParallelForkBundle": ["all"]
+            }
+        },
+        "laravel": {
+            "providers": [
+                "Henderkes\\ParallelFork\\Laravel\\ParallelForkServiceProvider"
+            ]
         }
     }
 }

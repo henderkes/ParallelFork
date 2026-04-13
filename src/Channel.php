@@ -130,15 +130,3 @@ final class Channel
         // Don't auto-close — streams may be shared via fork
     }
 }
-
-namespace Henderkes\ParallelFork\Channel;
-
-class Error extends \Henderkes\ParallelFork\Error {}
-
-namespace Henderkes\ParallelFork\Channel\Error;
-
-use Henderkes\ParallelFork\Channel\Error;
-
-class Existence extends Error {}
-class IllegalValue extends Error {}
-class Closed extends Error {}

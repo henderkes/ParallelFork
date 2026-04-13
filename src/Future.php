@@ -142,15 +142,3 @@ final class Future
         }
     }
 }
-
-namespace Henderkes\ParallelFork\Future;
-
-class Error extends \Henderkes\ParallelFork\Error {}
-
-namespace Henderkes\ParallelFork\Future\Error;
-
-use Henderkes\ParallelFork\Error;
-
-class Killed extends Error {}
-class Cancelled extends Error {}
-class Foreign extends Error {}

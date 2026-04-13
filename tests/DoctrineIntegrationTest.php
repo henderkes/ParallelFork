@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\ORMSetup;
 use Doctrine\ORM\Tools\SchemaTool;
+use Henderkes\ParallelFork\Handlers;
 use Henderkes\ParallelFork\Runtime;
 use PHPUnit\Framework\TestCase;
 use Tests\Entity\Product;
@@ -31,6 +32,9 @@ class DoctrineIntegrationTest extends TestCase
             'path' => $this->dbPath,
         ]);
         $this->em = new EntityManager($conn, $config);
+
+        // Register atFork handler to reconnect Doctrine in child processes
+        Runtime::atFork('doctrine', Handlers::doctrine($this->em));
 
         $tool = new SchemaTool($this->em);
         $tool->createSchema($this->em->getMetadataFactory()->getAllMetadata());
@@ -66,6 +70,14 @@ class DoctrineIntegrationTest extends TestCase
         }
         if (isset($this->dbPath) && \file_exists($this->dbPath)) {
             @\unlink($this->dbPath);
+        }
+
+        // Clean up atFork callbacks registered during tests
+        try {
+            $ref = new \ReflectionClass(Runtime::class);
+            $ref->getProperty('namedCallbacks')->setValue(null, []);
+            $ref->getProperty('anonymousCallbacks')->setValue(null, []);
+        } catch (\Throwable) {
         }
     }
 
@@ -212,7 +224,7 @@ class DoctrineIntegrationTest extends TestCase
         $repo = $this->em->getRepository(Product::class);
         $rt = new Runtime;
 
-        // Each child gets only the repo — no EM needed for read-only work
+        // Each child gets only the repo — atFork handler resets the underlying EM connection
         $categories = ['electronics', 'clothing', 'tools', 'books'];
         $futures = [];
         foreach ($categories as $cat) {
@@ -320,7 +332,7 @@ class DoctrineIntegrationTest extends TestCase
         $repo = $em->getRepository(Product::class);
         $rt = new Runtime;
 
-        // Arrow function captures both $em and $repo — reconnection must handle both
+        // Arrow function captures both $em and $repo — atFork handler resets the connection
         $future = $rt->run(fn () => array_map(
             fn (Product $p) => ['name' => $p->getName(), 'price' => $p->getPrice()],
             $repo->findBy(['category' => 'electronics'])

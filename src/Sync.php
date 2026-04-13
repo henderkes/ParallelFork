@@ -15,6 +15,8 @@ final class Sync
 
     private int $ipcKey;
 
+    private int $creatorPid;
+
     public function __construct(mixed $value = null)
     {
         if ($value !== null && ! \is_scalar($value)) {
@@ -23,6 +25,7 @@ final class Sync
             );
         }
 
+        $this->creatorPid = \getmypid();
         $this->ipcKey = $this->generateKey();
 
         $shm = \shmop_open($this->ipcKey, 'c', 0600, $this->shmSize);
@@ -138,6 +141,13 @@ final class Sync
 
     public function __destruct()
     {
+        // Only the process that created the resources should destroy them.
+        // Forked children inherit the Sync object but must not remove the
+        // shared memory or semaphores when they exit.
+        if (\getmypid() !== $this->creatorPid) {
+            return;
+        }
+
         try {
             if (isset($this->shm)) {
                 \shmop_delete($this->shm);
@@ -158,13 +168,3 @@ final class Sync
         }
     }
 }
-
-namespace Henderkes\ParallelFork\Sync;
-
-class Error extends \Henderkes\ParallelFork\Error {}
-
-namespace Henderkes\ParallelFork\Sync\Error;
-
-use Henderkes\ParallelFork\Sync\Error;
-
-class IllegalValue extends Error {}
