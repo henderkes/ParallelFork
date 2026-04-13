@@ -33,10 +33,12 @@ final class Handlers
     {
         return static function () use ($emOrConnection) {
             // Unwrap EntityManager → Connection if needed
+            $conn = $emOrConnection;
             if (\method_exists($emOrConnection, 'getConnection')) {
-                $conn = $emOrConnection->getConnection();
-            } else {
-                $conn = $emOrConnection;
+                $result = $emOrConnection->getConnection();
+                if (\is_object($result)) {
+                    $conn = $result;
+                }
             }
 
             $ref = new \ReflectionClass($conn);
@@ -53,7 +55,7 @@ final class Handlers
             }
 
             $old = $prop->getValue($conn);
-            if ($old !== null && \is_object($old)) {
+            if (\is_object($old)) {
                 Runtime::$abandonedConnections[] = $old;
                 $prop->setValue($conn, null);
                 // Don't call connect() — it's protected in DBAL 4.x.
@@ -153,14 +155,20 @@ final class Handlers
 
                 // Stash and unset handle (curl_multi) — recreated lazily via __get()
                 if ($multiRef->hasProperty('handle') && isset($multi->handle)) {
-                    Runtime::$abandonedConnections[] = $multi->handle;
+                    $handle = $multi->handle;
                     unset($multi->handle);
+                    if (\is_object($handle)) {
+                        Runtime::$abandonedConnections[] = $handle;
+                    }
                 }
 
                 // Stash and unset share (curl_share) — recreated lazily via __get()
                 if ($multiRef->hasProperty('share') && isset($multi->share)) {
-                    Runtime::$abandonedConnections[] = $multi->share;
+                    $share = $multi->share;
                     unset($multi->share);
+                    if (\is_object($share)) {
+                        Runtime::$abandonedConnections[] = $share;
+                    }
                 }
             }
 

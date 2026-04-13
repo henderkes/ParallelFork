@@ -21,7 +21,7 @@ final class Runtime
      *
      * @var list<object>
      */
-    public static array $abandonedConnections = []; // @phpstan-ignore property.onlyWritten
+    public static array $abandonedConnections = [];
 
     private ?string $bootstrap;
 
@@ -44,7 +44,9 @@ final class Runtime
     public static function atFork(string|callable $nameOrCallback, ?callable $callback = null): void
     {
         if (\is_string($nameOrCallback)) {
-            self::$namedCallbacks[$nameOrCallback] = $callback;
+            if ($callback !== null) {
+                self::$namedCallbacks[$nameOrCallback] = $callback;
+            }
         } else {
             self::$anonymousCallbacks[] = $nameOrCallback;
         }

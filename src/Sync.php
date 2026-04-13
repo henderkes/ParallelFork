@@ -25,7 +25,7 @@ final class Sync
             );
         }
 
-        $this->creatorPid = \getmypid();
+        $this->creatorPid = (int) \getmypid();
         $this->ipcKey = $this->generateKey();
 
         $shm = \shmop_open($this->ipcKey, 'c', 0600, $this->shmSize);
