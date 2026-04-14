@@ -34,12 +34,12 @@ final class ParallelForkBundle extends Bundle implements CompilerPassInterface
 
         // Collect all services tagged with 'parallel_fork.reset'.
         // Two ways to get tagged:
-        //   1. Implement ForkAwareInterface (auto-tagged above) — calls resetForFork()
+        //   1. Implement ForkAwareInterface (auto-tagged above) — calls atFork()
         //   2. Manually tag in services.yaml with a 'method' attribute:
         //      tags: [{ name: parallel_fork.reset, method: reconnect }]
         $tagged = [];
         foreach ($container->findTaggedServiceIds('parallel_fork.reset') as $id => $tags) {
-            $method = $tags[0]['method'] ?? 'resetForFork';
+            $method = $tags[0]['method'] ?? 'atFork';
             $tagged[] = ['ref' => new Reference($id), 'method' => $method];
         }
 
