@@ -10,6 +10,8 @@ final class Future
 
     private bool $isCancelled = false;
 
+    private bool $isKilled = false;
+
     private mixed $cached = null;
 
     private ?\Throwable $cachedError = null;
@@ -33,8 +35,28 @@ final class Future
         $this->stream = $stream;
     }
 
+    /**
+     * @internal Called by Runtime::kill()
+     */
+    public function markKilled(): void
+    {
+        $this->isKilled = true;
+        $this->resolved = true;
+        $this->isError = true;
+        $this->cachedError = new Future\Error\Killed('task was killed');
+
+        if (\is_resource($this->stream)) {
+            \fclose($this->stream);
+            $this->stream = null;
+        }
+    }
+
     public function value(): mixed
     {
+        if ($this->isKilled && $this->cachedError !== null) {
+            throw $this->cachedError;
+        }
+
         if ($this->isCancelled) {
             throw new Future\Error\Cancelled('cannot retrieve value');
         }

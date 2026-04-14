@@ -231,6 +231,7 @@ final class Runtime
         $this->closed = true;
 
         foreach ($this->children as $pid => $future) {
+            $future->markKilled();
             \posix_kill($pid, SIGKILL);
         }
 

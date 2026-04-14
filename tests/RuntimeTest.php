@@ -73,7 +73,7 @@ class RuntimeTest extends TestCase
     public function test_kill_terminates_children(): void
     {
         $runtime = new Runtime;
-        $runtime->run(static function (): void {
+        $future = $runtime->run(static function (): void {
             sleep(2);
         });
 
@@ -82,6 +82,9 @@ class RuntimeTest extends TestCase
         $elapsed = microtime(true) - $start;
 
         $this->assertLessThan(1.0, $elapsed);
+
+        $this->expectException(\Henderkes\ParallelFork\Future\Error\Killed::class);
+        $future->value();
     }
 
     public function test_before_child_handler(): void
