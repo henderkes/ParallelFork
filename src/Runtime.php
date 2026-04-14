@@ -102,10 +102,16 @@ final class Runtime
         }
 
         foreach ($this->beforeParentNamed as $cb) {
-            $cb();
+            try {
+                $cb();
+            } catch (\Throwable) {
+            }
         }
         foreach ($this->beforeParentAnon as $cb) {
-            $cb();
+            try {
+                $cb();
+            } catch (\Throwable) {
+            }
         }
 
         $pair = \stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -121,7 +127,8 @@ final class Runtime
         }
 
         if ($pid === 0) {
-            // Prevent child's destructor from interfering with parent's futures
+            // Prevent child's destructors from interfering with parent's futures
+            Future::$inChild = true;
             $this->children = [];
             $this->closed = true;
 
@@ -140,11 +147,13 @@ final class Runtime
                 }
             }
 
+            $exitCode = 0;
             $payload = '';
             try {
                 $result = empty($argv) ? $task() : $task(...$argv);
                 $payload = \serialize(['ok' => true, 'v' => $result]);
             } catch (\Throwable $e) {
+                $exitCode = 1;
                 $payload = \serialize([
                     'ok' => false,
                     'e' => $e->getMessage(),
@@ -177,7 +186,7 @@ final class Runtime
             }
             \fclose($pair[1]);
 
-            exit(0);
+            exit($exitCode);
         }
 
         \fclose($pair[1]);
@@ -214,12 +223,17 @@ final class Runtime
 
         $this->closed = true;
 
-        foreach ($this->children as $future) {
+        // Copy to avoid issues with childCompleted() mutating $this->children
+        $children = $this->children;
+        foreach ($children as $pid => $future) {
             try {
                 $future->value();
             } catch (\Throwable) {
+                // value() threw (cancelled, error, etc.) — ensure child is reaped
+                \pcntl_waitpid($pid, $status);
             }
         }
+        $this->children = [];
     }
 
     public function kill(): void

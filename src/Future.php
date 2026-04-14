@@ -4,6 +4,9 @@ namespace Henderkes\ParallelFork;
 
 final class Future
 {
+    /** @internal Set by Runtime in child process to prevent destructors from reaping siblings */
+    public static bool $inChild = false;
+
     private bool $resolved = false;
 
     private bool $isError = false;
@@ -18,6 +21,8 @@ final class Future
 
     /** @var resource|null */
     private mixed $stream;
+
+    private ?int $waitStatus = null;
 
     /**
      * @internal
@@ -58,6 +63,7 @@ final class Future
         }
 
         if ($this->isCancelled) {
+            $this->reap();
             throw new Future\Error\Cancelled('cannot retrieve value');
         }
 
@@ -84,18 +90,26 @@ final class Future
         \fclose($stream);
         $this->stream = null;
 
-        \pcntl_waitpid($this->pid, $status);
-        /** @var int $status */
+        $status = $this->reap();
         $this->resolved = true;
 
         if ($data === '') {
+            // Check if child was signaled (killed externally, segfault, etc.)
+            if (\pcntl_wifsignaled($status)) {
+                $this->isError = true;
+                $sig = \pcntl_wtermsig($status);
+                $this->cachedError = new Future\Error\Killed("child was killed by signal $sig");
+                $this->runtime->childCompleted($this->pid, $this->cachedError, $status);
+                throw $this->cachedError;
+            }
+
             $this->cached = null;
             $this->runtime->childCompleted($this->pid, null, $status);
 
             return null;
         }
 
-        $result = @\unserialize($data);
+        $result = @\unserialize($data, ['allowed_classes' => true]);
         if (! \is_array($result) || ! isset($result['ok'])) {
             $this->isError = true;
             $this->cachedError = new Future\Error\Foreign('Invalid data from child process');
@@ -121,10 +135,15 @@ final class Future
 
     public function done(): bool
     {
-        if ($this->resolved || $this->isCancelled) {
+        if ($this->resolved || $this->isCancelled || $this->isKilled) {
             return true;
         }
+
         $res = \pcntl_waitpid($this->pid, $status, WNOHANG);
+        if ($res > 0) {
+            /** @var int $status */
+            $this->waitStatus = $status;
+        }
 
         return $res > 0 || $res === -1;
     }
@@ -139,6 +158,11 @@ final class Future
         }
         $this->isCancelled = true;
         \posix_kill($this->pid, SIGTERM);
+
+        if (\is_resource($this->stream)) {
+            \fclose($this->stream);
+            $this->stream = null;
+        }
 
         return true;
     }
@@ -165,13 +189,32 @@ final class Future
         return new \RuntimeException($fullMessage);
     }
 
+    /**
+     * Reap the child process. Uses saved status from done() if available.
+     */
+    private function reap(): int
+    {
+        if ($this->waitStatus !== null) {
+            return $this->waitStatus;
+        }
+
+        \pcntl_waitpid($this->pid, $status);
+        /** @var int $status */
+        $this->waitStatus = $status;
+
+        return $status;
+    }
+
     public function __destruct()
     {
+        if (self::$inChild) {
+            return;
+        }
         if (\is_resource($this->stream)) {
             \fclose($this->stream);
         }
-        if (! $this->resolved && $this->pid > 0) {
-            \pcntl_waitpid($this->pid, $status, WNOHANG);
+        if (! $this->resolved && ! $this->isKilled && $this->pid > 0) {
+            \pcntl_waitpid($this->pid, $status);
         }
     }
 }
