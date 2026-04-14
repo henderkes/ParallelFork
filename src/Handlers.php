@@ -11,6 +11,18 @@ namespace Henderkes\ParallelFork;
  */
 final class Handlers
 {
+    /**
+     * Stash an object so PHP's GC doesn't close its underlying fd.
+     * Only called in child processes which exit immediately — no permanent leak.
+     */
+    private static function abandon(object $obj): void
+    {
+        // A static local in a private method — invisible to users, can't leak
+        // across requests because children exit after their task.
+        static $stash = [];
+        $stash[] = $obj;
+    }
+
     public static function doctrine(object $emOrConnection): \Closure
     {
         return static function () use ($emOrConnection) {
@@ -37,7 +49,7 @@ final class Handlers
 
             $old = $prop->getValue($conn);
             if (\is_object($old)) {
-                Runtime::$abandonedConnections[] = $old;
+                Handlers::abandon($old);
                 $prop->setValue($conn, null);
             }
         };
@@ -46,7 +58,7 @@ final class Handlers
     public static function pdo(\PDO $pdo): \Closure
     {
         return static function () use ($pdo) {
-            Runtime::$abandonedConnections[] = $pdo;
+            Handlers::abandon($pdo);
         };
     }
 
@@ -115,7 +127,7 @@ final class Handlers
                     $handle = $multi->handle;
                     unset($multi->handle);
                     if (\is_object($handle)) {
-                        Runtime::$abandonedConnections[] = $handle;
+                        self::abandon($handle);
                     }
                 }
 
@@ -123,7 +135,7 @@ final class Handlers
                     $share = $multi->share;
                     unset($multi->share);
                     if (\is_object($share)) {
-                        Runtime::$abandonedConnections[] = $share;
+                        self::abandon($share);
                     }
                 }
             }

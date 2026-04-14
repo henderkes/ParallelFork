@@ -33,8 +33,6 @@ final class Runtime
     /** @var list<callable> */
     private array $afterParentAnon = [];
 
-    /** @var list<object> */
-    public static array $abandonedConnections = [];
 
     public function before(?string $name = null, ?callable $child = null, ?callable $parent = null): self
     {
