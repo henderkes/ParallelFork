@@ -2,62 +2,94 @@
 
 namespace Henderkes\ParallelFork;
 
-/** Fork-based Runtime using pcntl_fork(). Child inherits full parent state via OS copy-on-write. */
 final class Runtime
 {
     private bool $closed = false;
 
-    /** @var array<string, callable> Named handlers (string key = name) */
-    private static array $namedCallbacks = [];
+    /** @var array<int, Future> */
+    private array $children = [];
 
-    /** @var list<callable> Anonymous handlers */
-    private static array $anonymousCallbacks = [];
+    /** @var array<string, callable> */
+    private array $beforeChildNamed = [];
 
-    /**
-     * Stashed connections to prevent destructors from closing inherited sockets.
-     * atFork handlers should stash old connection objects here instead of closing
-     * them, because close() sends a protocol-level Terminate that kills the
-     * parent's shared socket. The child exits and the OS cleans up.
-     *
-     * @var list<object>
-     */
+    /** @var list<callable> */
+    private array $beforeChildAnon = [];
+
+    /** @var array<string, callable> */
+    private array $beforeParentNamed = [];
+
+    /** @var list<callable> */
+    private array $beforeParentAnon = [];
+
+    /** @var array<string, callable> */
+    private array $afterChildNamed = [];
+
+    /** @var list<callable> */
+    private array $afterChildAnon = [];
+
+    /** @var array<string, callable> */
+    private array $afterParentNamed = [];
+
+    /** @var list<callable> */
+    private array $afterParentAnon = [];
+
+    /** @var list<object> */
     public static array $abandonedConnections = [];
 
-    private ?string $bootstrap;
-
-    public function __construct(?string $bootstrap = null)
+    public function before(?string $name = null, ?callable $child = null, ?callable $parent = null): self
     {
-        $this->bootstrap = $bootstrap;
-    }
-
-    /**
-     * Register a callback to run in every child process after fork but before
-     * task execution. Use this to reset connections, clear caches, or
-     * reinitialize any state that should not be shared across the fork boundary.
-     *
-     * Named handlers (string first argument) can be overridden by registering
-     * another handler with the same name. Anonymous handlers are always additive.
-     *
-     *     Runtime::atFork('doctrine', Handlers::doctrine($em));   // named
-     *     Runtime::atFork(function () { ... });                    // anonymous
-     */
-    public static function atFork(string|callable $nameOrCallback, ?callable $callback = null): void
-    {
-        if (\is_string($nameOrCallback)) {
-            if ($callback !== null) {
-                self::$namedCallbacks[$nameOrCallback] = $callback;
+        if ($name !== null) {
+            if ($child !== null) {
+                $this->beforeChildNamed[$name] = $child;
+            }
+            if ($parent !== null) {
+                $this->beforeParentNamed[$name] = $parent;
             }
         } else {
-            self::$anonymousCallbacks[] = $nameOrCallback;
+            if ($child !== null) {
+                $this->beforeChildAnon[] = $child;
+            }
+            if ($parent !== null) {
+                $this->beforeParentAnon[] = $parent;
+            }
         }
+
+        return $this;
     }
 
-    /**
-     * Remove a named atFork handler.
-     */
-    public static function removeAtFork(string $name): void
+    public function after(?string $name = null, ?callable $child = null, ?callable $parent = null): self
     {
-        unset(self::$namedCallbacks[$name]);
+        if ($name !== null) {
+            if ($child !== null) {
+                $this->afterChildNamed[$name] = $child;
+            }
+            if ($parent !== null) {
+                $this->afterParentNamed[$name] = $parent;
+            }
+        } else {
+            if ($child !== null) {
+                $this->afterChildAnon[] = $child;
+            }
+            if ($parent !== null) {
+                $this->afterParentAnon[] = $parent;
+            }
+        }
+
+        return $this;
+    }
+
+    public function removeBefore(string $name): self
+    {
+        unset($this->beforeChildNamed[$name], $this->beforeParentNamed[$name]);
+
+        return $this;
+    }
+
+    public function removeAfter(string $name): self
+    {
+        unset($this->afterChildNamed[$name], $this->afterParentNamed[$name]);
+
+        return $this;
     }
 
     /**
@@ -69,42 +101,46 @@ final class Runtime
             throw new Runtime\Error\Closed('Runtime has been closed');
         }
 
+        foreach ($this->beforeParentNamed as $cb) {
+            $cb();
+        }
+        foreach ($this->beforeParentAnon as $cb) {
+            $cb();
+        }
+
         $pair = \stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
         if (! $pair) {
             throw new \RuntimeException('stream_socket_pair failed');
         }
 
-        // Reap any zombie children from previous forks
-        /** @noinspection PhpStatementHasEmptyBodyInspection */
-        while (\pcntl_waitpid(-1, $status, WNOHANG) > 0);
-
         $pid = \pcntl_fork();
         if ($pid < 0) {
             \fclose($pair[0]);
             \fclose($pair[1]);
-            throw new \RuntimeException('fork() failed');
+            throw new \RuntimeException('pcntl_fork() failed');
         }
 
         if ($pid === 0) {
+            // Prevent child's destructor from interfering with parent's futures
+            $this->children = [];
+            $this->closed = true;
+
             \fclose($pair[0]);
 
-            if ($this->bootstrap !== null) {
-                require_once $this->bootstrap;
-            }
-
-            foreach (self::$namedCallbacks as $cb) {
+            foreach ($this->beforeChildNamed as $cb) {
                 try {
                     $cb();
                 } catch (\Throwable) {
                 }
             }
-            foreach (self::$anonymousCallbacks as $cb) {
+            foreach ($this->beforeChildAnon as $cb) {
                 try {
                     $cb();
                 } catch (\Throwable) {
                 }
             }
 
+            $payload = '';
             try {
                 $result = empty($argv) ? $task() : $task(...$argv);
                 $payload = \serialize(['ok' => true, 'v' => $result]);
@@ -113,7 +149,21 @@ final class Runtime
                     'ok' => false,
                     'e' => $e->getMessage(),
                     'c' => \get_class($e),
+                    't' => $e->getTraceAsString(),
                 ]);
+            } finally {
+                foreach ($this->afterChildNamed as $cb) {
+                    try {
+                        $cb();
+                    } catch (\Throwable) {
+                    }
+                }
+                foreach ($this->afterChildAnon as $cb) {
+                    try {
+                        $cb();
+                    } catch (\Throwable) {
+                    }
+                }
             }
 
             $len = \strlen($payload);
@@ -132,22 +182,72 @@ final class Runtime
 
         \fclose($pair[1]);
 
-        return new Future($pid, $pair[0]);
+        $future = new Future($pid, $pair[0], $this);
+        $this->children[$pid] = $future;
+
+        return $future;
+    }
+
+    public function childCompleted(int $pid, mixed $result, int $status): void
+    {
+        unset($this->children[$pid]);
+
+        foreach ($this->afterParentNamed as $cb) {
+            try {
+                $cb($result, $status);
+            } catch (\Throwable) {
+            }
+        }
+        foreach ($this->afterParentAnon as $cb) {
+            try {
+                $cb($result, $status);
+            } catch (\Throwable) {
+            }
+        }
     }
 
     public function close(): void
     {
         if ($this->closed) {
-            throw new Runtime\Error\Closed('Runtime closed');
+            throw new Runtime\Error\Closed('Runtime has been closed');
         }
+
         $this->closed = true;
+
+        foreach ($this->children as $future) {
+            try {
+                $future->value();
+            } catch (\Throwable) {
+            }
+        }
     }
 
     public function kill(): void
     {
         if ($this->closed) {
-            throw new Runtime\Error\Closed('Runtime closed');
+            throw new Runtime\Error\Closed('Runtime has been closed');
         }
+
         $this->closed = true;
+
+        foreach ($this->children as $pid => $future) {
+            \posix_kill($pid, SIGKILL);
+        }
+
+        foreach ($this->children as $pid => $future) {
+            \pcntl_waitpid($pid, $status);
+        }
+
+        $this->children = [];
+    }
+
+    public function __destruct()
+    {
+        if (! $this->closed) {
+            try {
+                $this->close();
+            } catch (\Throwable) {
+            }
+        }
     }
 }

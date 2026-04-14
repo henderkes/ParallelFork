@@ -6,20 +6,18 @@ use Henderkes\ParallelFork\Handlers;
 use Henderkes\ParallelFork\Runtime;
 
 /**
- * Wired by ParallelForkBundle. Registers atFork handlers for injected services.
- *
- * @internal
+ * @internal Wired by ParallelForkBundle.
  */
 final class AtForkRegistrar
 {
-    public function __construct(?object $entityManager = null, ?object $httpClient = null)
+    public function __construct(Runtime $runtime, ?object $entityManager = null, ?object $httpClient = null)
     {
         if ($entityManager !== null) {
-            Runtime::atFork('doctrine', Handlers::doctrine($entityManager));
+            $runtime->before(name: 'doctrine', child: Handlers::doctrine($entityManager));
         }
 
         if ($httpClient !== null) {
-            Runtime::atFork('http_client', Handlers::httpClient($httpClient));
+            $runtime->before(name: 'http_client', child: Handlers::httpClient($httpClient));
         }
     }
 

@@ -9,14 +9,11 @@
         "ext-posix": "*"
     },
     "suggest": {
-        "ext-shmop": "Required for Sync (shared memory)",
-        "ext-sysvsem": "Required for Sync (semaphores)",
         "symfony/http-kernel": "For automatic Doctrine/HttpClient reset in Symfony apps (via ParallelForkBundle)",
         "symfony/dependency-injection": "For automatic Doctrine/HttpClient reset in Symfony apps (via ParallelForkBundle)",
         "illuminate/support": "For automatic DB::purge() in Laravel apps (via ParallelForkServiceProvider)"
     },
     "require-dev": {
-        "ext-parallel": "*",
         "phpunit/phpunit": "^13.1",
         "doctrine/orm": "^3.7.x-dev",
         "doctrine/dbal": "^4.4",
@@ -26,8 +23,7 @@
         "symfony/var-exporter": "^7.0",
         "symfony/framework-bundle": "^6.4 || ^7.0 || ^8.0",
         "phpstan/phpstan": "^2.1",
-        "laravel/pint": "^1.29",
-        "brlabrussia/parallel-stub": "^1.1"
+        "laravel/pint": "^1.29"
     },
     "autoload": {
         "psr-4": {
