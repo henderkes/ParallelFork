@@ -34,7 +34,7 @@ final class Runtime
     private array $afterParentAnon = [];
 
 
-    public function before(?string $name = null, ?callable $child = null, ?callable $parent = null): self
+    public function before(?callable $child = null, ?callable $parent = null, ?string $name = null): self
     {
         if ($name !== null) {
             if ($child !== null) {
@@ -55,7 +55,7 @@ final class Runtime
         return $this;
     }
 
-    public function after(?string $name = null, ?callable $child = null, ?callable $parent = null): self
+    public function after(?callable $child = null, ?callable $parent = null, ?string $name = null): self
     {
         if ($name !== null) {
             if ($child !== null) {
